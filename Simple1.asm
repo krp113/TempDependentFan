@@ -4,6 +4,8 @@
 	extern  LCD_Setup, LCD_Write_Message	    ; external LCD subroutines
 	extern	LCD_Write_Hex			    ; external LCD subroutines
 	extern  ADC_Setup, ADC_Read		    ; external ADC routines
+	extern  PWM_Setup, PWM_SetWidth		    ; PWM routines
+
 	
 acs0	udata_acs   ; reserve data space in access ram
 counter	    res 1   ; reserve one byte for a counter variable
@@ -27,6 +29,7 @@ setup	bcf	EECON1, CFGS	; point to Flash program memory
 	call	UART_Setup	; setup UART
 	call	LCD_Setup	; setup LCD
 	call	ADC_Setup	; setup ADC
+	call	PWM_Setup	; setup PWM
 	goto	start
 	
 	; ******* Main programme ****************************************
@@ -51,6 +54,9 @@ loop 	tblrd*+			; one byte from PM to TABLAT, increment TBLPRT
 	movlw	myTable_l	; output message to UART
 	lfsr	FSR2, myArray
 	call	UART_Transmit_Message
+	
+	movlw	0x40
+	call	PWM_SetWidth
 	
 measure_loop
 	call	ADC_Read
