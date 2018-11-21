@@ -5,7 +5,7 @@
 	extern	LCD_Write_Hex			    ; external LCD subroutines
 	extern  ADC_Setup, ADC_Read		    ; external ADC routines
 	extern  PWM_Setup, PWM_SetWidth		    ; PWM routines
-	extern	I2C_Setup
+	extern	I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_StatReg_Display, I2C_Ack_Display
 
 	
 acs0	udata_acs   ; reserve data space in access ram
@@ -31,7 +31,11 @@ setup	bcf	EECON1, CFGS	; point to Flash program memory
 	call	LCD_Setup	; setup LCD
 	call	ADC_Setup	; setup ADC
 	call	PWM_Setup	; setup PWM
-	call	I2C_Setup
+	call	I2C_Config
+	call	I2C_Temp_Conversion
+	call	I2C_Read_T_Data
+	call	I2C_StatReg_Display
+	call	I2C_Ack_Display
 	
 	goto	start
 	
@@ -61,7 +65,11 @@ loop 	tblrd*+			; one byte from PM to TABLAT, increment TBLPRT
 	movlw	0x40
 	call	PWM_SetWidth
 	
-	call I2C_Setup
+	call	I2C_Config
+	call	I2C_Temp_Conversion
+	call	I2C_Read_T_Data
+	call	I2C_Ack_Display
+	
 	return
 	
 measure_loop
