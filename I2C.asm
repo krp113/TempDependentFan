@@ -1,136 +1,192 @@
 #include p18f87k22.inc
 
-    global I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_StatReg_Display, I2C_Ack_Display
+global I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_StatReg_Display, I2C_Write_Configure_Thermometer, I2C_Temp_Conversion, I2C_TempH, I2C_TempL
+    
+acs0	udata_acs   ; reserve data space in access ram
+I2C_TempH	    res 1   ; reserve one byte for high byte of temperature
+I2C_TempL	    res 1   ; reserve one byte for low byte of temperature
+
     
     ADC    code		    ;why is 'ADC code' required here?
 
 L equ 0    
 H equ 1
 
-;Prior to starting temperature conversion, the configuration must be done
- 
-I2C_Config ; configuring the I2C slave by writing to the 'configuration register'
-	
-    bsf	    TRISC, RC3	; RC3 and RC4 pins are involved with I2C communication. However the RC3/4 pins need to write to slave too. Therefore 
-    bsf	    TRISC, RC4	; only the data line is receiving input from the thermometer. 
-			;So the data line is TRISC, RC3 = 1, and RC4 is output!!
-			
-    movlw   b'00111111'	; byte transferred into SSP1ADD to set the lowest possible clock frequency
-			; clock = Fosc / (SSP1ADD + 1); taking Fosc to be 64Mhz
-    movwf   SSP1ADD	; clock set to the min frequency of 125kHz
+;A list of commands
+Start_Convert_T		equ 0x51	    ;start temperature conversion 
+Stop_Convert_T		equ 0x22	    ;stop temperature conversion 
+Read_Temperature	equ 0xAA	    ;read temperautre register
+Access_TH		equ 0xA1	    ;access TH register
+Access_TL		equ 0xA2	    ;access TL register
+Access_Config		equ 0xAC	    ;access config register
+Software_POR		equ 0x54	    ;software POR command
+
+;Standard bytes
+WRITE			equ b'10010000'	    ;write control byte, <3:0> bits is slave address
+READ			equ b'10010001'	    ;read control byte
+
+;BAUD_RATE		equ .64		    ; sent in binary to SUP1ADD
+;Fosc			equ .64000000	    ; Fosc of MP
+Temp_Resolution		equ b'00001000'	    ;<3:2> = <R1:R0> for resolution
+
+;*****Setting up the registers for I2C communication*****
+I2C_Config 
+		
+    ; PortC pins used to communicate to slave
+    bsf	    TRISC, RC3	 
+    bsf	    TRISC, RC4	
     
-    movlw   b'00101000'	; there may be a problem with the MSb here, 5th bit enables the MSSP
-    movwf   SSP1CON1	; control register 1 for MSSP 1
+    ; BAUD RATE
+    movlw   b'00111111'	;Fosc / (4*(BAUD_RATE + 1))
+    movwf   SSP1ADD	
     
-    movlw   b'00000001'	; Control byte for START condition
-    movwf   SSP1CON2	; Control register 2 for MSSP 1
+    ;Slew Rate control, set to standard of 100kHz
     
-    movlw   b'10010000'	; Control byte to be sent to the slave, <1:3> bits is the slave address
-    movwf   SSP1BUF	; <0> = 0 means I want to write to the slave
+    movlw b'00000000'
+    movwf SSP1STAT
     
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
+    ; Configuring for using MSSP1 module in Master Mode
+    movlw   b'00101000'	
+    movwf   SSP1CON1	
+    return
     
-    movlw   0xAC	; access configuration command byte
-    movwf   SSP1BUF	; reloading SSP1BUF with the command byte
+    ;*****I2C WRITE/READ sequences*****
+I2C_Write_Configure_Thermometer
+    ; Initiate START condition
+    bsf   SSP1CON2, SEN	; setting bit for START condition
+    call  I2C_Check_If_Done ; waiting for I2C operation completion
     
-    ; Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
-    
-    movlw   b'0000100'	; configuration byte, setting resolution to 10bytes = PWM duty cycle resolution
+    ; Control byte to be transmitted to slave, with R/W* = 0
+    movlw   WRITE	
     movwf   SSP1BUF
+    call    I2C_Check_If_Done
+    movlw   0x01		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination
+      
+    ; Command byte to access configuration register in the slave
+    movlw   Access_Config	; access configuration command byte
+    movwf   SSP1BUF		;reloading SSP1BUF with the command byte
+    call    I2C_Check_If_Done ; waiting for I2C operation completion	
+    movlw   0x02		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination  
     
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
-    
-    movlw   b'00000100'	; Control byte for STOP condition
-    movwf   SSP1CON2
-    ;Interrupt is generated once the STOP condition is complete
+    ; Data byte to set resolution of temperature data
+    movlw   Temp_Resolution	 	; configuration byte, setting resolution to 10bytes = PWM duty cycle resolution
+    movwf   SSP1BUF
+    call    I2C_Check_If_Done ; waiting for I2C operation completion	
+    movlw   0x04		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination   
+    bsf	    SSP1CON2, PEN ; initiate STOP condition
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
     return
     
 I2C_Temp_Conversion
-    
-    movlw   b'00101000'	; 5th bit enables the MSSP
-    movwf   SSP1CON1	; control register 1 for MSSP 1
-    
-    movlw   b'00000001'	; Control byte for START condition
-    movwf   SSP1CON2	; Control register 2 for MSSP 1
-    
-    movlw   b'10010000'	; Control byte to be sent to the slave, <1:3> bits is the slave address
+     
+    bsf   SSP1CON2, SEN	; setting bit for START condition
+    call  I2C_Check_If_Done ; waiting for I2C operation completion
+
+    movlw   WRITE	; Control byte to be sent to the slave, <1:3> bits is the slave address
     movwf   SSP1BUF	; <0> = 0 means I want to WRITE to the slave
+    call    I2C_Check_If_Done ; waiting for I2C operation completion	
+    movlw   0x11		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination
     
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
-    
-    movlw   0x51	; initiate temperature conversion
+    movlw   Start_Convert_T	; initiate temperature conversion
     movwf   SSP1BUF	; reloading SSP1BUF with the command byte
+    call    I2C_Check_If_Done ; waiting for I2C operation completion	
     
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
+    movlw   0x12		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination
     
-    movlw   b'00000100'	; Control byte for STOP condition
-    movwf   SSP1CON2
-    ;Interrupt is generated once the STOP condition is complete
+    bsf	    SSP1CON2, PEN ; initiate STOP condition
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
     return
     
 I2C_Read_T_Data
     
-    movlw   b'00101000'	
-    movwf   SSP1CON1	
+    bsf	    SSP1CON2, SEN	; setting bit for START condition
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
     
-    movlw   b'00000001'	; Control byte for START condition
-    movwf   SSP1CON2	
-    
-    movlw   b'10010000'	; Control byte to be sent to the slave, <1:3> bits is the slave address
+    movlw   WRITE	; Control byte to be sent to the slave, <3:1> bits is the slave address
     movwf   SSP1BUF	; <0> = 0 means I want to WRITE to the slave first before I READ
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    movlw   0x21		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination
     
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
+    movlw   Read_Temperature	; Read Temperature register command byte
+    movwf   SSP1BUF		; reloading SSP1BUF with the command byte
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    movlw   0x22		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination
     
-    movlw   0xAA	; Read Temperature register command byte
-    movwf   SSP1BUF	; reloading SSP1BUF with the command byte
-    
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit. 
-    ;NEED A REPEAT START HERE!!! NOT STOP THEN START AGAIN...MAY CAUSE ISSUES
-    
-    movlw   b'00000010' ;setting the RSEN bit to 1, which eventually causes a REPEAT START condition
-    movwf   SSP1CON2   
+    bsf	    SSP1CON2, RSEN ;initiate REPEAT START condition
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
     ;probably need a delay here to ensure RSEN takes effect
-    movlw   b'10010001'	; Control byte to be sent to the slave, <1:3> bits is the slave address
+    movlw   READ	; Control byte to be sent to the slave, <1:3> bits is the slave address
     movwf   SSP1BUF	; <0> = 1 means NOW I want to READ from the slave 
-			
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    movlw   0x24		; error number
+    btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
+    goto    I2C_Error ; if NACK then error, skipping to termination
+    
+    bsf	    SSP1CON2, RCEN ; Enable I2C Receive Mode to receive high byte
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    
 			;here MASTER must respond to slave by sending an ACK for the first Temperature byte
 			;then a NACK for the second Temperautre byte. T is recorded in 2 bytes, but with 10-bit resolution
-        
-    ;Here The MSSP module generates an interrupt at the end of the ninth clock cycle 
-    ;by setting the SSPxIF bit.
-    
-    movlw   b'00000100'	; Control byte for STOP condition
-    movwf   SSP1CON2
-    ;Interrupt is generated once the STOP condition is complete
+			
+	; Send NACK bit for Acknowledge Sequence
 
+    bcf	    SSP1CON2, ACKDT ; ACKDT set to 0 corresponding to ACK
+    bsf	    SSP1CON2, ACKEN ; sending NACK 'now'
+    movf    SSP1BUF,W ; Get data from SSP1BUF into W register
+    movwf   I2C_TempH
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    
+    bsf	    SSP1CON2, RCEN ; Enable I2C Receive Mode to receive 2nd byte
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    
+    bsf	    SSP1CON2, ACKDT ; ACKDT set to 1 corresponding to NACK
+    bsf	    SSP1CON2, ACKEN ; sending NACK 'now'
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+
+    bsf	    SSP1CON2, PEN ; initiate STOP condition
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+
+    movf    SSP1BUF,W ; Get data from SSP1BUF into W register
+    movwf   I2C_TempL
+    clrf    TRISF
+    movwf   PORTF ; see which port is free to use
     return
     
-    ;one major issue is that the Microprocessor receives the temperature data with the MSb transferred first. 
-    ;therefore I require a function to reverse the data bits which can then be input into Duty cycle function
-    
-    ;TH and TL registers in the slave can be used to set up my condition for starting the fan. 
-    ;THF -> 1 if T > TH, TLF -> 1 if T < TL. Therefore I will need to READ the THF and TLF bits to start the 
-    ;fan once the TH bit is 1. The THF, TLF bits remain as 1 until they're reset by the user which is a problem too
-    ;because the point of the fan is to be automated when the program is running. Want it to stop once the temperature falls
-    ;below TH
-I2C_StatReg_Display ;display on PORTD
+I2C_StatReg_Display ;display Stat Reg on PORTD
     clrf    LATD
     movlw   0x00
     movwf   TRISD, ACCESS
     movff   SSP1STAT, PORTD
-    return
+    return 
+; *****Error subroutines *****
     
-I2C_Ack_Display	;display on PORTE
-    clrf    LATE
-    movlw   0x00
-    movwf   TRISE, ACCESS
-    movff   SSP1CON2, PORTE
+I2C_Error
+    clrf    TRISE
+    movwf   PORTE ; displaying error on PORTE
+ 
+    bsf	    SSP1CON2, PEN ; STOP condition
+    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    
+    goto $ ; stop at this location because the whole code will need to be reinitiated due to error
+    
+I2C_Check_If_Done
+    
+check	btfss PIR1, SSP1IF ; waiting for I2C operation completion
+	goto check ; I2C operation incomplete
+	bcf PIR1, SSP1IF ; I2C operation complete, clear flag
+	return	
 end
-    
