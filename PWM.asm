@@ -18,8 +18,8 @@ PWM_Setup		    ;Set up/configuration of PWM
     return
 
 PWM_SetWidth		    ; sets pulse width  to value stored in W. This value can have a 10-bit resolution hence corresponding to 
-    movlw   b'11111111'	    ; 1024 diffrent pulse widths therefore discrete but precise value of the fan motor speed can be achieved. 
-    movwf   CCPR4L	    ; CCPR4L contains the 8 MSbs of the Duty Cycle
+    movlw   b'00111111'	    ; 1024 diffrent pulse widths therefore discrete but precise value of the fan motor speed can be achieved. 
+    movwf   CCPR4L	    ; CCPR4L contains the 8 MSbs of the Duty Cycle, don't need this anymore
     return
 
     
