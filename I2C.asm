@@ -1,13 +1,13 @@
 #include p18f87k22.inc
 
-global I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_StatReg_Display, I2C_Write_Configure_Thermometer, I2C_Temp_Conversion, I2C_TempH, I2C_TempL
+global I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_Write_Configure_Thermometer, I2C_Temp_Conversion, I2C_TempH, I2C_TempL
     
 acs0	udata_acs   ; reserve data space in access ram
 I2C_TempH	    res 1   ; reserve one byte for high byte of temperature
 I2C_TempL	    res 1   ; reserve one byte for low byte of temperature
 
     
-    ADC    code		    ;why is 'ADC code' required here?
+ADC    code		    ;why is 'ADC code' required here?
 
 L equ 0    
 H equ 1
@@ -136,22 +136,20 @@ I2C_Read_T_Data
     btfsc   SSP1CON2, ACKSTAT ; Check status register bit for ACK 
     goto    I2C_Error ; if NACK then error, skipping to termination
     
+    ;receving high byte
     bsf	    SSP1CON2, RCEN ; Enable I2C Receive Mode to receive high byte
-    call    I2C_Check_If_Done ; waiting for I2C operation completion
-    
-			;here MASTER must respond to slave by sending an ACK for the first Temperature byte
-			;then a NACK for the second Temperautre byte. T is recorded in 2 bytes, but with 10-bit resolution
-			
-	; Send NACK bit for Acknowledge Sequence
-
-    bcf	    SSP1CON2, ACKDT ; ACKDT set to 0 corresponding to ACK
-    bsf	    SSP1CON2, ACKEN ; sending NACK 'now'
-    movf    SSP1BUF,W ; Get data from SSP1BUF into W register
+    call    I2C_Check_If_Done ; receving the data byte here, and waiting for it to complete
+    movf    SSP1BUF, W ; Get data from SSP1BUF into W register
     movwf   I2C_TempH
+    ;movff   I2C_TempH, CCPR4L ;transferring the temperature 'high byte' to duty cycle register
+   			
+    ; Send ACK bit for Acknowledge Sequence for receving first byte
+    bcf	    SSP1CON2, ACKDT ; ACKDT set to 0 corresponding to ACK
+    bsf	    SSP1CON2, ACKEN ; sending ACK 'now'
     call    I2C_Check_If_Done ; waiting for I2C operation completion
     
     bsf	    SSP1CON2, RCEN ; Enable I2C Receive Mode to receive 2nd byte
-    call    I2C_Check_If_Done ; waiting for I2C operation completion
+    call    I2C_Check_If_Done ; receving anotehr data byte here, and waiting for it to complete
     
     bsf	    SSP1CON2, ACKDT ; ACKDT set to 1 corresponding to NACK
     bsf	    SSP1CON2, ACKEN ; sending NACK 'now'
@@ -160,18 +158,23 @@ I2C_Read_T_Data
     bsf	    SSP1CON2, PEN ; initiate STOP condition
     call    I2C_Check_If_Done ; waiting for I2C operation completion
 
-    movf    SSP1BUF,W ; Get data from SSP1BUF into W register
-    movwf   I2C_TempL
-    clrf    TRISF
-    movwf   PORTF ; see which port is free to use
-    return
+    movf    SSP1BUF, W ; Get data from SSP1BUF into W register
+    movwf   I2C_TempH
+    clrf    TRISD
+    movwf   PORTD
+    ;movlw   high(0xDEAD); load 16bit number into
+    ;movwf   0x550	;FR 0x550
+    ;movlw   low(0xDEAD)
+    ;movwf   0x551	;and FR 0x551
+    ;call    big_delay
+    ;return
     
-I2C_StatReg_Display ;display Stat Reg on PORTD
-    clrf    LATD
-    movlw   0x00
-    movwf   TRISD, ACCESS
-    movff   SSP1STAT, PORTD
-    return 
+;I2C_StatReg_Display ;display Stat Reg on PORTD
+;    clrf    LATD
+ ;   movlw   0x00
+  ;  movwf   TRISD, ACCESS
+   ; movff   SSP1STAT, PORTD
+    ;return 
 ; *****Error subroutines *****
     
 I2C_Error
@@ -189,4 +192,12 @@ check	btfss PIR1, SSP1IF ; waiting for I2C operation completion
 	goto check ; I2C operation incomplete
 	bcf PIR1, SSP1IF ; I2C operation complete, clear flag
 	return	
+
+;*****big delay subroutouine*****
+big_delay
+	movlw	0x00; W=0
+dloop	decf	0x551,f; no carry when 0x00 -> 0xff
+	subwfb	0x550,f; no carry when 0x00 -> 0xff
+	bc	dloop; if carry, then loop again
+	return; carry not set so return
 end
