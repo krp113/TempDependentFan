@@ -1,6 +1,6 @@
 #include p18f87k22.inc
 
-    global  PWM_Setup, PWM_SetWidth
+    global  PWM_Setup
     
 ADC    code
     
@@ -17,11 +17,4 @@ PWM_Setup		    ;Set up/configuration of PWM
     bcf	    TRISG, CCP4	    ; clearing the RG3 pin to make it output
     return
 
-PWM_SetWidth		    ; sets pulse width  to value stored in W. This value can have a 10-bit resolution hence corresponding to 
-    movlw   b'01111111'	    ; 1024 diffrent pulse widths therefore discrete but precise value of the fan motor speed can be achieved. 
-    movwf   CCPR4L	    ; CCPR4L contains the 8 MSbs of the Duty Cycle, don't need this anymore
-    return
-
-    
-; here I also require a testing procedure to actually be able to control motor speed. I can do this with manual input. 
     end

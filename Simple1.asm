@@ -1,12 +1,12 @@
 	#include p18f87k22.inc
 
-	global	delay
+	global	Temp_dependent_fan_control
 	extern	UART_Setup, UART_Transmit_Message   ; external UART subroutines
 	extern  LCD_Setup, LCD_Write_Message	    ; external LCD subroutines
 	extern	LCD_Write_Hex			    ; external LCD subroutines
 	extern  ADC_Setup, ADC_Read		    ; external ADC routines
-	extern  PWM_Setup ;PWM_SetWidth		    ; PWM routines
-	extern	I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_Write_Configure_Thermometer, I2C_TempH, I2C_TempL, PWM_SetWidth
+	extern  PWM_Setup 		    §	    ; PWM Setup
+	extern	I2C_Config, I2C_Temp_Conversion, I2C_Read_T_Data, I2C_Write_Configure_Thermometer, I2C_TempH, I2C_TempL, Temperature_Comparison
 	
 acs0	udata_acs   ; reserve data space in access ram
 counter	    res 1   ; reserve one byte for a counter variable
@@ -57,23 +57,15 @@ loop 	tblrd*+			; one byte from PM to TABLAT, increment TBLPRT
 	movlw	myTable_l	; output message to UART
 	lfsr	FSR2, myArray
 	call	UART_Transmit_Message
-	call	PWM_SetWidth
 	
-measure_temp
+Temp_dependent_fan_control
 	call	I2C_Write_Configure_Thermometer
 	movlw	0xFF
 	movwf	delay_count
 	call	delay
 	call	I2C_Temp_Conversion
 	call	I2C_Read_T_Data
-	;call	I2C_StatReg_Display
-	 movlw	high(0xFFFF); load 16bit number into
-    movwf	0x550	;FR 0x550
-    movlw	low(0xFFFF)
-    movwf	0x551	;and FR 0x551
-    call	big_delay
-    
-    goto	measure_temp
+	call	Temperature_Comparison
 	return
 	
 measure_loop
